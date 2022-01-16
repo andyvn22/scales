@@ -1,0 +1,438 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width"/>
+    <title>The Wheel of Scales!</title>
+</head>
+<body>
+    <style>
+        *,
+        *:before,
+        *:after {
+            -webkit-box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            min-height: 100%;
+        }
+        
+        body {
+            background-image: url("media/space.jpg");
+        }
+        
+        form#scales {
+            color: white;
+            text-align: center;
+        }
+        
+        form#scales fieldset {
+            display: inline-block;
+            border: none;
+            margin: 0;
+            padding: 0;
+        }
+        
+        form#scales fieldset#common {
+            margin: 0 1.2em;
+        }
+        
+        form#scales label {
+            display: inline-block;
+            width: 1.2em;
+            letter-spacing: -0.06em;
+        }
+        
+        form#scales label.flat {
+            letter-spacing: -0.16em;
+        }
+        
+        form#spin {
+            text-align: center;
+            margin-top: 1em;
+        }
+        
+        form#spin input {
+            font-size: 150%;
+            font-weight: bold;
+            width: 5em;
+            height: 2em;
+            border: 2px solid #008822;
+            background-color: #66EE88;
+            border-radius: 20px;
+            margin-bottom: 1em;
+        }
+        
+        div#wheel-container {
+            margin-top: 1em;
+            position: relative;
+        }
+        
+        /* beware changes; these values are duplicated in jQuery below. */
+        div#wheel-container #arrow {
+            width: 4em;
+            height: 4em;
+            margin-left: -2em;
+            margin-top: -1.75em;
+            left: 50%;
+            top: 0;
+            
+            position: absolute;
+            z-index: 1;
+        }
+        
+        div#wheel {
+            /* fallbacks for lack of `vmin` support */
+            width: 80%;
+            height: 80%;
+            padding: 40%;
+            
+            /* ratio-preserving size to fit viewport (not perfectly supported, hence the fallbacks) */
+            width: 80vmin;
+            height: 80vmin;
+            padding: 40vmin; /* padding required for `#background`'s 100% to be right */
+            
+            margin: 0 auto;
+            
+            position: relative;
+            overflow: hidden;
+        }
+        
+        div#wheel #spin-count {
+            width: 100%;
+            margin-left: -50%;
+            margin-top: -1em;
+            position: absolute;
+            z-index: 1;
+            
+            text-align: center;
+            font-style: italic;
+            /* beware changes; font size is duplicated in jQuery below. */
+            font-size: 2em;
+            color: white;
+        }
+        
+        div#wheel div#background {
+            width: 100%;
+            height: 100%;
+            margin-left: -50%;
+            margin-top: -50%;
+            
+            position: absolute;
+            border-radius: 100%;
+            border: 4px solid teal;
+            background-image: url("media/wheel.gif");
+            
+            /* increase performance on iOS by triggering GPU acceleration */
+            transform: translate3d(0,0,0);
+            -webkit-transform: translate3d(0,0,0);
+        }
+        
+        div#wheel .scale {
+            width: 12.5%;
+            height: 12.5%;
+            line-height: 375%;
+            font-size: 100%;
+            
+            position: absolute;
+            
+            text-align: center;
+            letter-spacing: -0.06em;
+            border-radius: 100%;
+            border: 1px solid teal;
+            background-color: white;
+        }
+        
+        div#wheel .scale.flat {
+            letter-spacing: -0.16em;
+        }
+        
+        div#wheel .scale#current {
+            font-size: 250%;
+            line-height: 130%;
+            border: 4px solid red;
+            background-color: #FFDDEE;
+        }
+    </style>
+    <script src="include/jquery-1.12.2.min.js"></script>
+    <script src="include/jquery.easing.1.3.js"></script>
+    <script src="include/ion.sound.min.js"></script>
+    <script>
+        /*const*/ var SpinDuration = 7.5; //seconds
+        /*const*/ var ExtraRotations = 2;
+        /*const*/ var SelectionAngle = Math.PI/2;
+        /*const*/ var AllScaleNames = {"C-flat": "C&#x266d;", "G-flat": "G&#x266d;", "D-flat": "D&#x266d;", "A-flat": "A&#x266d;", "E-flat": "E&#x266d;", "B-flat": "B&#x266d;", "F": "F", "C": "C", "G": "G", "D": "D", "A": "A", "E": "E", "B": "B", "F-sharp": "F&#x266f;", "C-sharp": "C&#x266f;"};
+        
+        var CurrentSpinCount = 0;
+        var CurrentScales = {"A-flat": true, "E-flat": true, "B-flat": true, "F": true, "C": true, "G": true, "D": true};
+        var CurrentAngle = 0;
+        var CurrentlySpinning = false;
+        var CurrentScaleElement = null;
+        var PreviousScaleElements = [];
+        
+        //cached calculable stuff for `update...` methods
+        var ScaleElements;
+        var OuterRadius;
+        var ScaleWidth;
+        var ScalesRadius;
+        
+        //requires `updateForResize()` be called first, and therefore `createWheel()` as well
+        function updateWheelForRotation(angle) {
+            var corner = 2 * Math.PI / ScaleElements.length;
+            ScaleElements.each(function(index, element) {
+                element.style.left = OuterRadius - ScaleWidth/2 + ScalesRadius * Math.cos(-(SelectionAngle+angle) + corner*index) + "px"
+                element.style.top = OuterRadius - ScaleWidth/2 + ScalesRadius * Math.sin(-(SelectionAngle+angle) + corner*index) + "px"
+            });
+            
+            $("#wheel #background").css({
+                '-webkit-transform': 'rotate(' + -angle + 'rad)',
+                '-moz-transform': 'rotate(' + -angle + 'rad)',
+                '-ms-transform': 'rotate(' + -angle + 'rad)',
+                '-o-transform': 'rotate(' + -angle + 'rad)',
+                'transform': 'rotate(' + -angle + 'rad)',
+                'zoom': 1
+            });
+        }
+        
+        //requires `createWheel()` be called first
+        function updateForResize() {
+            OuterRadius = parseInt(window.getComputedStyle($("#wheel #background")[0]).getPropertyValue('width')) / 2;
+            $("#wheel-container").css({'font-size': OuterRadius/15 + 'px'});
+            ScaleWidth = ScaleElements[0].getBoundingClientRect().width;
+            ScalesRadius = OuterRadius - ScaleWidth;
+        }
+        
+        //automatically calls `updateForResize()` and `updateForWheelRotation()` when finished to display changes
+        function createWheel() {
+            $("#wheel .scale").remove()
+            for (var scale in AllScaleNames) { if (AllScaleNames.hasOwnProperty(scale)) {
+                if (scale in CurrentScales) {
+                    var className = "scale";
+                    if (scale.indexOf("flat") != -1) { className = "scale flat"; }
+                    $("#wheel").append("<div class='" + className + "'>" + AllScaleNames[scale] + "</div>");
+                }
+            }}
+            
+            CurrentScaleElement = null;
+            ScaleElements = $("#wheel .scale");
+            updateForResize();
+            updateWheelForRotation(CurrentAngle);
+        }
+        
+        function setCurrentScaleElement(newElement) {
+            if (CurrentScaleElement !== null) {
+                $(CurrentScaleElement).attr("id", "");
+            }
+            CurrentScaleElement = newElement;
+            if (CurrentScaleElement !== null) {
+                $(CurrentScaleElement).attr("id", "current");
+                PreviousScaleElements.push(CurrentScaleElement);
+                console.dir(PreviousScaleElements);
+            }
+        }
+        
+        function spinWheel() {
+            if (CurrentlySpinning) { return; }
+            var scales = $("#wheel .scale").toArray();
+            if (scales.length <= 1) { return; }
+            
+            var scaleChoices = [];
+            for (var i = 0; i < scales.length; i++) {
+                if ($.inArray(scales[i], PreviousScaleElements) == -1) {
+                    scaleChoices.push(scales[i]);
+                }
+            }
+            if (scaleChoices.length < 1) { scaleChoices = scales; PreviousScaleElements = []; }
+            
+            CurrentlySpinning = true;
+            setCurrentScaleElement(null);
+            
+            CurrentSpinCount += 1;
+            var countText = CurrentSpinCount + " spins!";
+            if (CurrentSpinCount == 1) { countText = CurrentSpinCount + " spin!"; }
+            $("#spin-count").text(countText);
+            $("#spin-count").css({
+                opacity: 1,
+                fontSize: "2em"
+            });
+            $("#spin-count").animate({
+                opacity: 0,
+                fontSize: "4em"
+            }, 2000);
+            
+            var newScale;
+            while (newScale == CurrentScaleElement) {
+                var randomIndex = Math.floor(Math.random() * scaleChoices.length);
+                newScale = scaleChoices[randomIndex];
+            }
+            
+            var newAngle = 2*Math.PI * $.inArray(newScale, scales) / scales.length;
+            var deltaAngle = newAngle - CurrentAngle;
+            if (Math.random() > 0.5) {
+                deltaAngle += Math.PI*2 * ExtraRotations;
+            } else {
+                deltaAngle -= Math.PI*2 * ExtraRotations;
+            }
+        
+            ion.sound.play("spin");
+            $({current: 0}).animate({current: 1}, {
+                duration: SpinDuration * 1000,
+                easing: "easeOutBounce",
+                step: function() {
+                    updateWheelForRotation(CurrentAngle + this.current*deltaAngle);
+                },
+                complete: function() {
+                    ion.sound.play("pick");
+                    updateWheelForRotation(newAngle);
+                    setCurrentScaleElement(newScale);
+                    CurrentAngle = newAngle;
+                    CurrentlySpinning = false;
+                    $("#arrow").animate({
+                        width: "6em",
+                        height: "6em",
+                        marginLeft: "-3em",
+                        marginTop: "-2.625em"
+                    }, 200, function() {
+                        $("#arrow").animate({
+                        width: "4em",
+                        height: "4em",
+                        marginLeft: "-2em",
+                        marginTop: "-1.75em"
+                    }, 600);
+                    });
+                }
+            });
+        }
+        
+        function readForm() {
+            $("form#scales input:checkbox:checked").each(function() {
+                CurrentScales[this.id] = true;
+            });
+            $("form#scales input:checkbox:not(:checked)").each(function() {
+                delete CurrentScales[this.id];
+            });
+            createWheel();
+        }
+        
+        function writeForm() {
+            $("form#scales input:checkbox").each(function() {
+                if (this.id in CurrentScales) {
+                    this.checked = true;
+                } else {
+                    this.checked = false;
+                }
+            });
+        }
+        
+        $(document).ready(function() {
+            writeForm();
+            createWheel();
+            
+            ion.sound({
+                sounds: [
+                    { name: "spin" },
+                    { name: "pick" }
+                ],
+                volume: 0.8,
+                path: "media/",
+                preload: true
+            });
+        
+            $("form#scales input:checkbox").click(function() {
+                readForm();
+            });
+            
+            $("form#scales input#none").click(function(event) {
+                event.preventDefault();
+                CurrentScales = {};
+                writeForm();
+                createWheel();
+            });
+            
+            $("form#scales input#first-7-a-flat").click(function(event) {
+                event.preventDefault();
+                CurrentScales = {"A-flat": true, "E-flat": true, "B-flat": true, "F": true, "C": true, "G": true, "D": true};
+                writeForm();
+                createWheel();
+            });
+            
+            $("form#scales input#first-7-a").click(function(event) {
+                event.preventDefault();
+                CurrentScales = {"A": true, "E-flat": true, "B-flat": true, "F": true, "C": true, "G": true, "D": true};
+                writeForm();
+                createWheel();
+            });
+            
+            $("form#scales input#all").click(function(event) {
+                event.preventDefault();
+                CurrentScales = {"C-flat": true, "G-flat": true, "D-flat": true, "A-flat": true, "E-flat": true, "B-flat": true, "F": true, "C": true, "G": true, "D": true, "A": true, "E": true, "B": true, "F-sharp": true, "C-sharp": true};
+                writeForm();
+                createWheel();
+            });
+            
+            $("#wheel-container").click(function() {
+                spinWheel();
+            });
+            
+            $("form#spin input#spinButton").click(function(event) {
+                event.preventDefault();
+                spinWheel();
+            });
+            
+            $(window).resize(function() {
+                updateForResize();
+                if (!CurrentlySpinning) {
+                    updateWheelForRotation(CurrentAngle);
+                }
+            });
+        });
+    </script>
+    <h1 style="display: none;">The Wheel of Scales!</h1>
+    
+    <form id="scales">
+        <fieldset>
+            <input type="checkbox" name="C" id="C"/><label for="C">C</label>
+        </fieldset>
+        <fieldset>
+            <input type="checkbox" id="F"/><label for="F">F</label>
+            <input type="checkbox" id="B-flat"/><label for="B-flat" class="flat">B&#x266d;</label>
+            <input type="checkbox" id="E-flat"/><label for="E-flat" class="flat">E&#x266d;</label>
+            <input type="checkbox" id="A-flat"/><label for="A-flat" class="flat">A&#x266d;</label>
+            <input type="checkbox" id="D-flat"/><label for="D-flat" class="flat">D&#x266d;</label>
+            <input type="checkbox" id="G-flat"/><label for="G-flat" class="flat">G&#x266d;</label>
+            <input type="checkbox" id="C-flat"/><label for="C-flat" class="flat">C&#x266d;</label>
+        </fieldset>
+        <fieldset>
+            <input type="checkbox" id="G"/><label for="G">G</label>
+            <input type="checkbox" id="D"/><label for="D">D</label>
+            <input type="checkbox" id="A"/><label for="A">A</label>
+            <input type="checkbox" id="E"/><label for="E">E</label>
+            <input type="checkbox" id="B"/><label for="B">B</label>
+            <input type="checkbox" id="F-sharp"/><label for="F-sharp">F&#x266f;</label>
+            <input type="checkbox" id="C-sharp"/><label for="C-sharp">C&#x266f;</label>
+        </fieldset>
+        <fieldset id="common">
+            <input type="submit" id="none" value="None"/>
+            <input type="submit" id="first-7-a-flat" value="7 with A&#x266d;"/>
+            <input type="submit" id="first-7-a" value="7 with A"/>
+            <input type="submit" id="all" value="All"/>
+        </fieldset>
+    </form>
+    
+    <form id="spin">
+        <div>
+            <input type="submit" id="spinButton" value="Spin!"/>
+        </div>
+    </form>
+    
+    <div id="wheel-container">
+        <img id="arrow" src="media/arrow.gif"/>
+        <div id="wheel">
+            <span id="spin-count"></span>
+            <div id="background"></div>
+        </div>
+    </div>
+</body>
+</html>
